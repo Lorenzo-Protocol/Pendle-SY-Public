@@ -17,7 +17,7 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
     // Errors
     error InvalidClaimer(address claimer);
     error InvalidAmount(uint256 amount);
-
+    error InvalidBankReleaser(address bankReleaser);
     // Modifiers
     modifier onlyClaimer() {
         if (!claimers[msg.sender]) {
@@ -27,7 +27,7 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
     }
 
     // Constants
-    IERC20 public immutable rewardToken;
+    IERC20 public immutable override rewardToken;
 
     // State Variables
     struct RewardState {
@@ -42,6 +42,9 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
     // [claimer] => RewardState
     mapping(address => RewardState) public rewardState;
 
+    // EOA account to release BANK rewards
+    address public bankReleaser;
+
 // ------------------------------
 // Constructor
 // ------------------------------
@@ -49,13 +52,15 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
         rewardToken = IERC20(_rewardToken);
     }
 
-    function initialize(address _owner) external initializer {
+    function initialize(address _owner, address _bankReleaser) external initializer {
         require(_owner != address(0), "zero owner");
 
         __Ownable_init();
         __UUPSUpgradeable_init();
 
         _transferOwnership(_owner);
+
+        bankReleaser = _bankReleaser;
     }
 
     function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
@@ -76,7 +81,11 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
     // @dev release the rewards from the SY
     // @param claimer the claimer address
     // @param amount the amount of rewards to release
-    function releaseRewards(address claimer, uint256 amount) external onlyOwner {
+    function releaseRewards(address claimer, uint256 amount) external {
+        if (msg.sender != bankReleaser) {
+            revert InvalidBankReleaser(msg.sender);
+        }
+
         if (claimer == address(0)) {
             revert InvalidClaimer(claimer);
         }
@@ -84,6 +93,8 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
         if (amount == 0) {
             revert InvalidAmount(amount);
         }
+
+        SafeERC20.safeTransferFrom(rewardToken, bankReleaser, address(this), amount);
 
         rewardState[claimer].pendingAmount  += amount;
         rewardState[claimer].releasedAmount += amount;
@@ -107,10 +118,5 @@ contract PendleLorenzoSUsd1PlusReward is UUPSUpgradeable, OwnableUpgradeable, IS
         emit ClaimReward(claimer, amount, uint32(block.timestamp));
 
         return amount;
-    }
-
-    // @dev get the reward token
-    function getRewardToken() external view override returns (address) {
-        return address(rewardToken);
     }
 }

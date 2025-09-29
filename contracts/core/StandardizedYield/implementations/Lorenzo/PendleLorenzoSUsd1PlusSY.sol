@@ -1,16 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 pragma solidity ^0.8.0;
-
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import "../../SYBaseWithRewardsUpg.sol";
 import "../../../../interfaces/Lorenzo/ISUsd1PlusVault.sol";
 import "../../../../interfaces/Lorenzo/ISUsd1PlusReward.sol";
 
-contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
+contract PendleLorenzoSUsd1PlusSY is SYBaseWithRewardsUpg {
     using PMath for uint256;
 
     address public immutable sUSD1PlusVaultAddr;
     address public immutable rewardManagerAddr;
+    address public immutable rewardTokenAddr;
     address public immutable usd1Addr;
     address public immutable usdtAddr;
     address public immutable usdcAddr;
@@ -22,7 +21,7 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
         address _usdt,
         address _usdc,
         address _sUSD1Plus,
-        address _rewardToken
+        address _rewardTokenMgrAddr
     )
         SYBaseUpg(_sUSD1Plus)
     {
@@ -31,23 +30,28 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
         usdcAddr = _usdc;
 
         sUSD1PlusVaultAddr = _sUSD1Plus;
-        rewardManagerAddr = _rewardToken;
+        rewardManagerAddr = _rewardTokenMgrAddr;
+        rewardTokenAddr = address(ISUsd1PlusReward(rewardManagerAddr).rewardToken());
 
+        require(rewardTokenAddr != _sUSD1Plus, "rewardTokenAddr is sUSD1Plus");
     }
 
     function initialize() external initializer {
         __SYBaseUpg_init("SY staked sUSD1+", "SY-sUSD1+");
     }
 
-    function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
+    // function _authorizeUpgrade(address newImplementation) internal override onlyOwner {}
 
     function _deposit(address tokenIn, uint256 amountDeposited) internal virtual override returns (uint256) {
-        if (!isValidTokenIn(tokenIn)) {
-            revert InvalidTokenIn(tokenIn);
+        if (tokenIn == sUSD1PlusVaultAddr) {
+            return amountDeposited;
         }
 
         uint256 preBalance = _selfBalance(sUSD1PlusVaultAddr);
-        ISUsd1PlusVault(sUSD1PlusVaultAddr).deposit(tokenIn, amountDeposited);
+
+        IERC20(tokenIn).approve(sUSD1PlusVaultAddr, amountDeposited);
+        ISUsd1PlusVault(sUSD1PlusVaultAddr).directDeposit(tokenIn, amountDeposited);
+
         return _selfBalance(sUSD1PlusVaultAddr) - preBalance;
     }
 
@@ -76,7 +80,7 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
      * @dev See {IStandardizedYield-getRewardTokens}
      */
     function _getRewardTokens() internal view override returns (address[] memory) {
-        return ArrayLib.create(ISUsd1PlusReward(rewardManagerAddr).getRewardToken());
+        return ArrayLib.create(rewardTokenAddr);
     }
 
     function _redeemExternalReward() internal override {
@@ -105,7 +109,7 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
     }
 
     function getTokensIn() public view virtual override returns (address[] memory) {
-        return ArrayLib.create(usd1Addr, usdtAddr, usdcAddr);
+        return ArrayLib.create(usd1Addr, usdtAddr, usdcAddr, sUSD1PlusVaultAddr);
     }
 
     function getTokensOut() public view virtual override returns (address[] memory) {
@@ -113,7 +117,7 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
     }
 
     function isValidTokenIn(address token) public view virtual override returns (bool) {
-        return token == usd1Addr || token == usdtAddr || token == usdcAddr;
+        return token == usd1Addr || token == usdtAddr || token == usdcAddr || token == sUSD1PlusVaultAddr;
     }
 
     function isValidTokenOut(address token) public view virtual override returns (bool) {
@@ -121,6 +125,6 @@ contract PendleLorenzoSUsd1PlusSY is UUPSUpgradeable, SYBaseWithRewardsUpg {
     }
 
     function assetInfo() external view returns (AssetType assetType, address assetAddress, uint8 assetDecimals) {
-        return (AssetType.TOKEN, sUSD1PlusVaultAddr, IERC20Metadata(sUSD1PlusVaultAddr).decimals());
+        return (AssetType.TOKEN, usd1Addr, IERC20Metadata(usd1Addr).decimals());
     }
 }
